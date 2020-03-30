@@ -157,7 +157,7 @@ def wait_for(ebs, app_name, env_name, wait_timeout, testfunc):
     while True:
         try:
             env = describe_env(ebs, app_name, env_name, [])
-        except Exception, e:
+        except Exception as e:
             raise e
 
         if testfunc(env):
@@ -192,7 +192,7 @@ def describe_env(ebs, app_name, env_name, ignored_statuses):
     if not isinstance(envs, list): return None
 
     for env in envs:
-        if env.has_key("Status") and env["Status"] in ignored_statuses:
+        if env.get("Status") in ignored_statuses:
             envs.remove(env)
 
     if len(envs) == 0: return None
@@ -206,7 +206,7 @@ def describe_env_config_settings(ebs, app_name, env_name):
     if not isinstance(envs, list): return None
 
     for env in envs:
-        if env.has_key("Status") and env["Status"] in ["Terminated","Terminating"]:
+        if env.get("Status") in ["Terminated","Terminating"]:
             envs.remove(env)
 
     if len(envs) == 0: return None
@@ -218,9 +218,9 @@ def update_required(ebs, env, params):
     if params["version_label"] and env["VersionLabel"] != params["version_label"]:
         updates.append(('VersionLabel', env['VersionLabel'], params['version_label']))
 
-    if params.get("template_name", None) and not env.has_key("TemplateName"):
+    if params.get("template_name", None) and "TemplateName" not in env:
         updates.append(('TemplateName', None, params['template_name']))
-    elif env.has_key("TemplateName") and env["TemplateName"] != params["template_name"]:
+    elif "TemplateName" in env and env["TemplateName"] != params["template_name"]:
         updates.append(('TemplateName', env['TemplateName'], params['template_name']))
 
     result = ebs.describe_configuration_settings(ApplicationName=params["app_name"],
@@ -273,7 +273,7 @@ def check_env(ebs, app_name, env_name, module):
     module.exit_json(**result)
 
 def filter_empty(**kwargs):
-    return {k:v for k,v in kwargs.iteritems() if v}
+    return {k:v for k,v in kwargs.items() if v}
 
 def main():
     argument_spec = ec2_argument_spec()
@@ -333,15 +333,15 @@ def main():
         try:
             env = describe_env(ebs, app_name, env_name, [])
             result = dict(changed=False, env=[] if env is None else env)
-        except ClientError, e:
-            module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
+        except ClientError as e:
+            module.fail_json(msg=e.args[0], **camel_dict_to_snake_dict(e.response))
 
     if state == 'details':
         try:
             env = describe_env_config_settings(ebs, app_name, env_name)
             result = dict(changed=False, env=env)
-        except ClientError, e:
-            module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
+        except ClientError as e:
+            module.fail_json(msg=e.args[0], **camel_dict_to_snake_dict(e.response))
 
     if module.check_mode and (state != 'list' or state != 'details'):
         check_env(ebs, app_name, env_name, module)
@@ -349,7 +349,7 @@ def main():
 
     if state == 'present':
         try:
-            tags_to_apply = [ {'Key':k,'Value':v} for k,v in tags.iteritems()]
+            tags_to_apply = [ {'Key':k,'Value':v} for k,v in tags.items()]
             ebs.create_environment(**filter_empty(ApplicationName=app_name,
                                                   EnvironmentName=env_name,
                                                   VersionLabel=version_label,
@@ -363,11 +363,11 @@ def main():
 
             env = wait_for(ebs, app_name, env_name, wait_timeout, status_is_ready)
             result = dict(changed=True, env=env)
-        except ClientError, e:
-            if 'Environment %s already exists' % env_name in e.message:
+        except ClientError as e:
+            if 'Environment %s already exists' % env_name in e.args[0]:
                 update = True
             else:
-                module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
+                module.fail_json(msg=e.args[0], **camel_dict_to_snake_dict(e.response))
 
     if update:
         try:
@@ -388,19 +388,19 @@ def main():
                 result = dict(changed=True, env=env, updates=updates)
             else:
                 result = dict(changed=False, env=env)
-        except ClientError, e:
-            module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
+        except ClientError as e:
+            module.fail_json(msg=e.args[0], **camel_dict_to_snake_dict(e.response))
 
     if state == 'absent':
         try:
             ebs.terminate_environment(EnvironmentName=env_name)
             env = wait_for(ebs, app_name, env_name, wait_timeout, terminated)
             result = dict(changed=True, env=env)
-        except ClientError, e:
-            if 'No Environment found for EnvironmentName = \'%s\'' % env_name in e.message:
+        except ClientError as e:
+            if 'No Environment found for EnvironmentName = \'%s\'' % env_name in e.args[0]:
                 result = dict(changed=False, output='Environment not found')
             else:
-                module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
+                module.fail_json(msg=e.args[0], **camel_dict_to_snake_dict(e.response))
 
     module.exit_json(**result)
 
